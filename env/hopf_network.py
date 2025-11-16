@@ -18,9 +18,9 @@ class HopfNetwork():
   """
   def __init__(self,
                 mu=1**2,                 # intrinsic amplitude, converges to sqrt(mu)
-                omega_swing=5*2*np.pi,   # frequency in swing phase (can edit)
-                omega_stance=2*2*np.pi,  # frequency in stance phase (can edit)
-                gait="TROT",             # Gait, can be TROT, WALK, PACE, BOUND, etc.
+                omega_swing=2*2*np.pi,   # frequency in swing phase (can edit)
+                omega_stance=1*2*np.pi,  # frequency in stance phase (can edit)
+                gait="PACE",             # Gait, can be TROT, WALK, PACE, BOUND, etc.
                 alpha=50,                # amplitude convergence factor
                 coupling_strength=1,     # coefficient to multiply coupling matrix
                 couple=True,             # whether oscillators should be coupled
@@ -70,14 +70,34 @@ class HopfNetwork():
     [TODO] Update all coupling matrices.
     """
     self.PHI_trot = np.array([
-      [0.0, np.pi, np.pi, 0.0],
-      [-np.pi, 0.0, 0.0, -np.pi],
-      [-np.pi, 0.0, 0.0, -np.pi],
-      [0.0, np.pi, np.pi, 0.0]
+      [0.0,    np.pi,  np.pi,  0.0   ],
+      [-np.pi, 0.0,    0.0,    -np.pi],
+      [-np.pi, 0.0,    0.0,    -np.pi],
+      [0.0,    np.pi,  np.pi,  0.0   ]
     ])
-    self.PHI_walk = np.zeros((4,4)) # [TODO]
-    self.PHI_bound = np.zeros((4,4)) # [TODO]
-    self.PHI_pace = np.zeros((4,4)) # [TODO]
+
+    self.PHI_walk = np.array([
+      [0.0,        np.pi/2,     np.pi,       3*np.pi/2 ],
+      [-np.pi/2,   0.0,         np.pi/2,     np.pi     ],
+      [-np.pi,    -np.pi/2,     0.0,         np.pi/2   ],
+      [-3*np.pi/2, -np.pi,      -np.pi/2,    0.0       ]
+    ])
+
+    self.PHI_pace = np.array([
+      [0.0,    np.pi,  0.0,    np.pi ],
+      [-np.pi, 0.0,   -np.pi,  0.0   ],
+      [0.0,    np.pi,  0.0,    np.pi ],
+      [-np.pi, 0.0,   -np.pi,  0.0   ]
+    ])
+
+    self.PHI_bound = np.array([
+      [0.0,    0.0,    np.pi,  np.pi ],
+      [0.0,    0.0,    np.pi,  np.pi ],
+      [-np.pi, -np.pi, 0.0,    0.0   ],
+      [-np.pi, -np.pi, 0.0,    0.0   ]
+    ])
+
+
 
     if gait == "TROT":
       self.PHI = self.PHI_trot
