@@ -18,9 +18,9 @@ class HopfNetwork():
   """
   def __init__(self,
                 mu=1**2,                 # intrinsic amplitude, converges to sqrt(mu)
-                omega_swing=2*2*np.pi,   # frequency in swing phase (can edit)
-                omega_stance=1*2*np.pi,  # frequency in stance phase (can edit)
-                gait="PACE",             # Gait, can be TROT, WALK, PACE, BOUND, etc.
+                omega_swing=5*2*np.pi,   # frequency in swing phase (can edit)
+                omega_stance=2*2*np.pi,  # frequency in stance phase (can edit)
+                gait="TROT",             # Gait, can be TROT, WALK, PACE, BOUND, etc.
                 alpha=50,                # amplitude convergence factor
                 coupling_strength=1,     # coefficient to multiply coupling matrix
                 couple=True,             # whether oscillators should be coupled
@@ -119,20 +119,18 @@ class HopfNetwork():
       self._integrate_hopf_equations_rl()
     
     # map CPG variables to Cartesian foot xz positions (Equations 8, 9) 
-    theta = self.X[1, :]
-    r = self.X[0, :]
-    s = np.sin(theta)
-    
-    x = x = -r * np.cos(theta)
-    z = z = -self._robot_height + np.where(
-      s > 0,
-      self._ground_clearance * s,
-      self._ground_penetration * s
-    )
+    x = - self.get_r() * np.cos(self.get_theta())   
+    z = np.zeros(4)
+    for i in range(4): # 单独计算每条腿 compute individual legs
+      flag = np.sin(self.get_theta()[i])
+      if flag > 0:
+        z[i] = self._ground_clearance * flag - self._robot_height
+      else:
+        z[i] = self._ground_penetration * flag - self._robot_height
 
     # scale x by step length
     if not self.use_RL:
-      x = self._des_step_len * x
+      x = x * self._des_step_len
       return x, z
     else:
       # RL uses amplitude to set max step length
@@ -149,30 +147,27 @@ class HopfNetwork():
     # loop through each leg's oscillator
     for i in range(4):
       # get r_i, theta_i from X
-      r, theta = X[:, i]
+      r, theta     = X[0,i], X[1,i]
       # compute r_dot (Equation 6)
       r_dot = self._alpha * (self._mu - r**2) * r
       # determine whether oscillator i is in swing or stance phase to set natural frequency omega_swing or omega_stance (see Section 3)
-      phi = theta % (2 * np.pi)
-      if 0 <= phi < np.pi:
-        omega = self._omega_stance
+      if theta < np.pi:
+        theta_dot = self._omega_swing
       else:
-        omega = self._omega_swing
-      theta_dot = omega
+        theta_dot = self._omega_stance
 
       # loop through other oscillators to add coupling (Equation 7)
+      theta_sum = 0
       if self._couple:
-        for j in range(4):
-          r_j = X[0, j]
-          theta_j = X[1, j]
-          theta_dot += self._coupling_strength * r_j * np.sin(theta_j - theta - self.PHI[i, j])
+        theta_sum = sum([X[0,j]*self._coupling_strength*np.sin(X[1,j]-theta-self.PHI[i,j]) for j in range(4)])
 
+      theta_dot += theta_sum
 
       # set X_dot[:,i]
       X_dot[:,i] = [r_dot, theta_dot]
 
     # integrate 
-    self.X = self.X = X + (X_dot_prev + X_dot) * self._dt / 2
+    self.X = X + (X_dot_prev + X_dot)/2 * self._dt
     self.X_dot = X_dot
     # mod phase variables to keep between 0 and 2pi
     self.X[1,:] = self.X[1,:] % (2*np.pi)

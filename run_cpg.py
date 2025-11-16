@@ -15,13 +15,13 @@ from matplotlib import pyplot as plt
 from env.hopf_network import HopfNetwork
 from env.quadruped_gym_env import QuadrupedGymEnv
 
-ADD_CARTESIAN_PD = False
+ADD_CARTESIAN_PD = True
 TIME_STEP = 0.001
 foot_y = 0.0838 # this is the hip length 
 sideSign = np.array([-1, 1, -1, 1]) # get correct hip sign (body right is negative)
 
 env = QuadrupedGymEnv(render=True,              # visualize
-                    on_rack=QuadrupedGymEnv,              # useful for debugging! 
+                    on_rack=False,              # useful for debugging! 
                     isRLGymInterface=False,     # not using RL
                     time_step=TIME_STEP,
                     action_repeat=1,
@@ -32,6 +32,7 @@ env = QuadrupedGymEnv(render=True,              # visualize
 
 # initialize Hopf Network, supply gait
 cpg = HopfNetwork(time_step=TIME_STEP)
+cpg._set_gait("TROT")
 
 TEST_STEPS = int(10 / (TIME_STEP))
 t = np.arange(TEST_STEPS)*TIME_STEP
@@ -82,19 +83,16 @@ for j in range(TEST_STEPS):
 
     # add Cartesian PD contribution
     if ADD_CARTESIAN_PD:
-      # Get desired xyz position in leg frame (use ComputeJacobianAndPosition with the joint angles you just found above)
-      _, pd = env.robot.ComputeJacobianAndPosition(i, leg_q)
-
       # Get current Jacobian and foot position in leg frame (see ComputeJacobianAndPosition() in quadruped.py)
-      J, p = env.robot.ComputeJacobianAndPosition(i, q_leg)
+      J, p = env.robot.ComputeJacobianAndPosition(i)
 
       # Get current foot velocity in leg frame (Equation 2)
       v = J @ dq_leg
 
       # Calculate torque contribution from Cartesian PD (Equation 5) [Make sure you are using matrix multiplications]
-      vd = np.zeros(3)
-      f = kpCartesian @ (pd - p) + kdCartesian @ (vd - v)
-      tau += J.T @ f
+      des_p  = leg_xyz
+      des_v = np.zeros(3)
+      tau += J.T @ ((kpCartesian @ (des_p - p) + kdCartesian @ (des_v - v))) 
 
     # Set tau for legi in action vector
     action[3*i:3*i+3] = tau
