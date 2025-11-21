@@ -26,7 +26,7 @@ DEBUG_MODE = True
 LEARNING_ALG = "PPO" # or "SAC"
 LOAD_NN = False # if you want to initialize training with a previous model 
 NUM_ENVS = 1    # how many pybullet environments to create for data collection
-USE_GPU = True # make sure to install all necessary drivers 
+USE_GPU = False # make sure to install all necessary drivers 
 
 # after implementing, you will want to test how well the agent learns with your MDP: 
 # env_configs = {"motor_control_mode":"CPG",
@@ -38,6 +38,7 @@ env_configs = {
     "observation_space_mode": "DEFAULT",
     "on_rack": False,
     "render": False,
+    "record_video": False,
     "terrain": None
 }
 
@@ -125,7 +126,7 @@ if LOAD_NN:
     print("\nLoaded model", model_name, "\n")
 
 # Learn and save (may need to train for longer)
-total_steps = 5000 if DEBUG_MODE else 1000000
+total_steps = 100000 if DEBUG_MODE else 1000000
 model.learn(total_timesteps=total_steps, log_interval=1,callback=checkpoint_callback)
 
 # Don't forget to save the VecNormalize statistics when saving the agent
