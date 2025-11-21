@@ -21,7 +21,7 @@ from utils.file_utils import get_latest_model
 # gym environment
 from env.quadruped_gym_env import QuadrupedGymEnv
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 LEARNING_ALG = "PPO" # or "SAC"
 LOAD_NN = False # if you want to initialize training with a previous model 
