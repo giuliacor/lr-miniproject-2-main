@@ -118,7 +118,7 @@ class HopfNetwork():
     # map CPG variables to Cartesian foot xz positions (Equations 8, 9) 
     x = - self.get_r() * np.cos(self.get_theta())   
     z = np.zeros(4)
-    for i in range(4): # 单独计算每条腿 compute individual legs
+    for i in range(4):
       flag = np.sin(self.get_theta()[i])
       if flag > 0:
         z[i] = self._ground_clearance * flag - self._robot_height
