@@ -23,6 +23,8 @@ from env.quadruped_gym_env import QuadrupedGymEnv
 
 DEBUG_MODE = False
 
+SEEDS = [0, 1, 2, 3, 4]
+
 LEARNING_ALG = "PPO" # or "SAC"
 LOAD_NN = False # if you want to initialize training with a previous model 
 NUM_ENVS = 1    # how many pybullet environments to create for data collection
@@ -112,9 +114,9 @@ sac_config={"learning_rate":1e-4,
             "device": gpu_arg}
 
 if LEARNING_ALG == "PPO":
-    model = PPO('MlpPolicy', env, **ppo_config)
+    model = PPO('MlpPolicy', env, seed=SEEDS[0], **ppo_config)
 elif LEARNING_ALG == "SAC":
-    model = SAC('MlpPolicy', env, **sac_config)
+    model = SAC('MlpPolicy', env, seed=SEEDS[0], **sac_config)
 else:
     raise ValueError(LEARNING_ALG + 'not implemented')
 
