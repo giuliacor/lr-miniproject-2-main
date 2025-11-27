@@ -114,9 +114,9 @@ sac_config={"learning_rate":1e-4,
             "device": gpu_arg}
 
 if LEARNING_ALG == "PPO":
-    model = PPO('MlpPolicy', env, seed=SEEDS[0], **ppo_config)
+    model = PPO('MlpPolicy', env, seed=SEEDS[1], **ppo_config)
 elif LEARNING_ALG == "SAC":
-    model = SAC('MlpPolicy', env, seed=SEEDS[0], **sac_config)
+    model = SAC('MlpPolicy', env, seed=SEEDS[1], **sac_config)
 else:
     raise ValueError(LEARNING_ALG + 'not implemented')
 
