@@ -271,31 +271,32 @@ class QuadrupedGymEnv(gym.Env):
     """Decide whether we should stop the episode and reset the environment. """
     return self.is_fallen() 
 
-  def _reward_fwd_locomotion(self, des_vel_x=0.5):
-    """Learn forward locomotion at a desired velocity. """
-    # vel_tracking_reward = 0.1 * np.clip(self.robot.GetBaseLinearVelocity()[0], 0.2, 1.0)
-    # If you want to track a desired velocity 
-    vel_tracking_reward = 0.05 * np.exp( -1/ 0.25 *  (self.robot.GetBaseLinearVelocity()[0] - des_vel_x)**2 )
-    
-    # minimize yaw (go straight)
-    yaw_reward = -0.2 * np.abs(self.robot.GetBaseOrientationRollPitchYaw()[2]) 
-    
-    # don't drift laterally 
-    drift_reward = -0.01 * abs(self.robot.GetBasePosition()[1]) 
-    
-    # minimize energy 
-    energy_reward = 0 
+  def _reward_fwd_locomotion(self, des_vel_x=0.4):
+    vel_tracking_reward = 0.05 * np.exp(
+        -1 / 0.25 * (self.robot.GetBaseLinearVelocity()[0] - des_vel_x) ** 2
+    )
 
-    for tau,vel in zip(self._dt_motor_torques,self._dt_motor_velocities):
-      energy_reward += np.abs(np.dot(tau,vel)) * self._time_step
+    yaw_reward = -0.2 * np.abs(self.robot.GetBaseOrientationRollPitchYaw()[2])
+    drift_reward = -0.01 * abs(self.robot.GetBasePosition()[1])
 
-    reward = vel_tracking_reward \
-            + yaw_reward \
-            + drift_reward \
-            - 0.01 * energy_reward \
-            - 0.1 * np.linalg.norm(self.robot.GetBaseOrientation() - np.array([0,0,0,1]))
+    energy_reward = 0
+    for tau, vel in zip(self._dt_motor_torques, self._dt_motor_velocities):
+        energy_reward += np.abs(np.dot(tau, vel)) * self._time_step
 
-    return max(reward,0) # keep rewards positive
+    joint_vel = np.asarray(self.robot.GetMotorVelocities())
+    vel_penalty = 0.001 * np.linalg.norm(joint_vel) ** 2
+
+    reward = (
+        vel_tracking_reward
+        + yaw_reward
+        + drift_reward
+        - 0.05 * energy_reward      # was 0.01
+        - vel_penalty               # new
+        - 0.1 * np.linalg.norm(self.robot.GetBaseOrientation() - np.array([0, 0, 0, 1]))
+    )
+
+    return max(reward, 0)
+
 
   def get_distance_and_angle_to_goal(self):
     """ Helper to return distance and angle to current goal location. """
