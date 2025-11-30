@@ -180,7 +180,10 @@ class QuadrupedGymEnv(gym.Env):
     self.reset()
  
   def setupCPG(self):
-    self._cpg = HopfNetwork(use_RL=True)
+    self._cpg = HopfNetwork(
+        use_RL=True,
+        gait="PACE"  # or TROT
+    )
 
   ######################################################################################
   # RL Observation and Action spaces 
@@ -272,80 +275,30 @@ class QuadrupedGymEnv(gym.Env):
     return self.is_fallen() 
 
   def _reward_fwd_locomotion(self, des_vel_x=0.2):
-    """Reward for forward locomotion at a desired velocity with smoother, straighter motion."""
+    """Learn forward locomotion at a desired velocity. """
+    # vel_tracking_reward = 0.1 * np.clip(self.robot.GetBaseLinearVelocity()[0], 0.2, 1.0)
+    # If you want to track a desired velocity 
+    vel_tracking_reward = 0.05 * np.exp( -1/ 0.25 *  (self.robot.GetBaseLinearVelocity()[0] - des_vel_x)**2 )
+    
+    # minimize yaw (go straight)
+    yaw_reward = -0.2 * np.abs(self.robot.GetBaseOrientationRollPitchYaw()[2]) 
+    
+    # don't drift laterally 
+    drift_reward = -0.01 * abs(self.robot.GetBasePosition()[1]) 
+    
+    # minimize energy 
+    energy_reward = 0 
 
-    # --- base states ---
-    base_lin_vel = self.robot.GetBaseLinearVelocity()
-    base_ang_vel = self.robot.GetBaseAngularVelocity()
-    base_rpy     = self.robot.GetBaseOrientationRollPitchYaw()
-    base_pos     = self.robot.GetBasePosition()
+    for tau,vel in zip(self._dt_motor_torques,self._dt_motor_velocities):
+      energy_reward += np.abs(np.dot(tau,vel)) * self._time_step
 
-    vx = base_lin_vel[0]
-    vy = base_lin_vel[1]
-    roll, pitch, yaw = base_rpy
+    reward = vel_tracking_reward \
+            + yaw_reward \
+            + drift_reward \
+            - 0.01 * energy_reward \
+            - 0.1 * np.linalg.norm(self.robot.GetBaseOrientation() - np.array([0,0,0,1]))
 
-    # ------------------------------------------------------------------
-    # 1) Velocity tracking (main positive term)
-    # ------------------------------------------------------------------
-    # Gaussian around desired forward speed, reasonably wide
-    sigma_v = 0.15
-    speed_error = vx - des_vel_x
-    vel_tracking_reward = 0.2 * np.exp(-0.5 * (speed_error / sigma_v) ** 2)
-
-    # Also lightly reward raw forward speed up to some cap
-    vel_cap = 0.8
-    fwd_speed_term = 0.05 * np.clip(vx, 0.0, vel_cap)
-
-    # ------------------------------------------------------------------
-    # 2) Heading and lateral motion penalties
-    # ------------------------------------------------------------------
-    # Penalize yaw error (prefer facing x-direction)
-    yaw_penalty = 0.1 * yaw**2
-
-    # Penalize lateral COM position and lateral velocity to keep it on a corridor
-    drift_penalty    = 0.02 * base_pos[1]**2
-    lat_vel_penalty  = 0.05 * vy**2
-
-    # ------------------------------------------------------------------
-    # 3) Posture and jitter / angular motion penalties
-    # ------------------------------------------------------------------
-    # Penalize roll and pitch (keep body upright-ish)
-    posture_penalty = 0.1 * (roll**2 + pitch**2)
-
-    # Penalize large base angular velocities (reduces twitchy banging)
-    ang_vel_penalty = 0.02 * (base_ang_vel[0]**2 + base_ang_vel[1]**2 + base_ang_vel[2]**2)
-
-    # ------------------------------------------------------------------
-    # 4) Energy / joint velocity penalties
-    # ------------------------------------------------------------------
-    # Mechanical power integral over the action_repeat horizon
-    energy = 0.0
-    for tau, vel in zip(self._dt_motor_torques, self._dt_motor_velocities):
-      energy += np.abs(np.dot(tau, vel)) * self._time_step
-    energy_penalty = 0.03 * energy
-
-    # Light penalty on joint velocities to discourage high-frequency flapping
-    qdot = self.robot.GetMotorVelocities()
-    joint_vel_penalty = 0.001 * np.mean(qdot**2)
-
-    # ------------------------------------------------------------------
-    # 5) Combine
-    # ------------------------------------------------------------------
-    reward = (
-      vel_tracking_reward
-      + fwd_speed_term
-      - yaw_penalty
-      - drift_penalty
-      - lat_vel_penalty
-      - posture_penalty
-      - ang_vel_penalty
-      - energy_penalty
-      - joint_vel_penalty
-    )
-
-    # Keep rewards non-negative to match original design
-    return max(reward, 0.0)
-
+    return max(reward,0) # keep rewards positive
 
   def get_distance_and_angle_to_goal(self):
     """ Helper to return distance and angle to current goal location. """
@@ -511,10 +464,14 @@ class QuadrupedGymEnv(gym.Env):
       z = zs[i]
 
       # call inverse kinematics to get corresponding joint angles
-      q_des = np.zeros(3) # [TODO]
+      q_des = self.robot.ComputeInverseKinematics(i, np.array([x, y, z]))
       
       # Add joint PD contribution to tau
-      tau = np.zeros(3) # [TODO] 
+      q_leg = q[3*i:3*i+3]
+      dq_leg = dq[3*i:3*i+3]
+      kp_leg = kp[3*i:3*i+3]
+      kd_leg = kd[3*i:3*i+3]
+      tau = kp_leg * (q_des - q_leg) - kd_leg * dq_leg
 
       # add Cartesian PD contribution (as you wish)
       # tau +=

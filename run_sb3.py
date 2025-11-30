@@ -35,7 +35,7 @@ USE_GPU = True # make sure to install all necessary drivers
 #                "task_env": "FWD_LOCOMOTION", #  "LR_COURSE_TASK",
 #                "observation_space_mode": "LR_COURSE_OBS"}
 env_configs = {
-    "motor_control_mode": "PD",
+    "motor_control_mode": "CPG",
     "task_env": "FWD_LOCOMOTION",
     "observation_space_mode": "DEFAULT",
     "on_rack": False,
