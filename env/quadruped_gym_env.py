@@ -278,7 +278,7 @@ class QuadrupedGymEnv(gym.Env):
     vel_tracking_reward = 0.05 * np.exp( -1/ 0.25 *  (self.robot.GetBaseLinearVelocity()[0] - des_vel_x)**2 )
     
     # minimize yaw (go straight)
-    yaw_reward = -0.25 * np.abs(self.robot.GetBaseOrientationRollPitchYaw()[2]) 
+    yaw_reward = -0.2 * np.abs(self.robot.GetBaseOrientationRollPitchYaw()[2]) 
     
     # don't drift laterally 
     drift_reward = -0.01 * abs(self.robot.GetBasePosition()[1]) 
@@ -292,7 +292,7 @@ class QuadrupedGymEnv(gym.Env):
     reward = vel_tracking_reward \
             + yaw_reward \
             + drift_reward \
-            - 0.02 * energy_reward \
+            - 0.0 * energy_reward \
             - 0.1 * np.linalg.norm(self.robot.GetBaseOrientation() - np.array([0,0,0,1]))
 
     return max(reward,0) # keep rewards positive
