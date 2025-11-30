@@ -191,13 +191,39 @@ class QuadrupedGymEnv(gym.Env):
   def setupObservationSpace(self):
     """Set up observation space for RL. """
     if self._observation_space_mode == "DEFAULT":
-      observation_high = (np.concatenate((self._robot_config.UPPER_ANGLE_JOINT,
-                                         self._robot_config.VELOCITY_LIMITS,
-                                         np.array([1.0]*4))) +  OBSERVATION_EPS)
-      observation_low = (np.concatenate((self._robot_config.LOWER_ANGLE_JOINT,
-                                         -self._robot_config.VELOCITY_LIMITS,
-                                         np.array([-1.0]*4))) -  OBSERVATION_EPS)
+      high_q = self._robot_config.UPPER_ANGLE_JOINT
+      low_q  = self._robot_config.LOWER_ANGLE_JOINT
 
+      high_qdot = self._robot_config.VELOCITY_LIMITS
+      low_qdot  = -self._robot_config.VELOCITY_LIMITS
+
+      high_base_ori = np.ones(4)
+      low_base_ori  = -np.ones(4)
+
+      # CPG additions
+      high_cpg_r = np.array([MU_UPP]*4)   # amplitudes
+      low_cpg_r  = np.zeros(4)
+
+      high_cpg_trig = np.ones(4)          # sinθ, cosθ ∈ [-1,1]
+      low_cpg_trig  = -np.ones(4)
+
+      observation_high = np.concatenate((
+          high_q,
+          high_qdot,
+          high_base_ori,
+          high_cpg_r,
+          high_cpg_trig,  # sinθ
+          high_cpg_trig   # cosθ
+      )) + OBSERVATION_EPS
+
+      observation_low = np.concatenate((
+          low_q,
+          low_qdot,
+          low_base_ori,
+          low_cpg_r,
+          low_cpg_trig,
+          low_cpg_trig
+      )) - OBSERVATION_EPS
     elif self._observation_space_mode == "LR_COURSE_OBS":
       # [TODO] Set observation upper and lower ranges. What are reasonable limits? 
       # Note 50 is arbitrary below, you may have more or less
@@ -225,9 +251,23 @@ class QuadrupedGymEnv(gym.Env):
   def _get_observation(self):
     """Get observation, depending on obs space selected. """
     if self._observation_space_mode == "DEFAULT":
-      self._observation = np.concatenate((self.robot.GetMotorAngles(), 
-                                          self.robot.GetMotorVelocities(),
-                                          self.robot.GetBaseOrientation() ))
+      q = self.robot.GetMotorAngles()
+      qdot = self.robot.GetMotorVelocities()
+      base_ori = self.robot.GetBaseOrientation()
+
+      r = self._cpg.get_r()
+      theta = self._cpg.get_theta()
+      sin_theta = np.sin(theta)
+      cos_theta = np.cos(theta)
+
+      self._observation = np.concatenate((
+          q,
+          qdot,
+          base_ori,
+          r,
+          sin_theta,
+          cos_theta
+      ))
     elif self._observation_space_mode == "LR_COURSE_OBS":
       # [TODO] Get observation from robot. What are reasonable measurements we could get on hardware?
       # if using the CPG, you can include states with self._cpg.get_r(), for example
