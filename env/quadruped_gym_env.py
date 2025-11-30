@@ -271,7 +271,7 @@ class QuadrupedGymEnv(gym.Env):
     """Decide whether we should stop the episode and reset the environment. """
     return self.is_fallen() 
 
-  def _reward_fwd_locomotion(self, des_vel_x=0.4):
+  def _reward_fwd_locomotion(self, des_vel_x=0.2):
     """Learn forward locomotion at a desired velocity. """
     # vel_tracking_reward = 0.1 * np.clip(self.robot.GetBaseLinearVelocity()[0], 0.2, 1.0)
     # If you want to track a desired velocity 
@@ -292,7 +292,7 @@ class QuadrupedGymEnv(gym.Env):
     reward = vel_tracking_reward \
             + yaw_reward \
             + drift_reward \
-            - 0.02 * energy_reward \
+            - 0.04 * energy_reward \
             - 0.1 * np.linalg.norm(self.robot.GetBaseOrientation() - np.array([0,0,0,1]))
 
     return max(reward,0) # keep rewards positive

@@ -109,8 +109,8 @@ MOTOR_KD = [1.0, 1.0, 1.0] * NUM_LEGS
 # MOTOR_KD = [0.8,0.8,0.8] * NUM_LEGS
 
 # Sample Cartesian Gains
-# kpCartesian = np.diag([500,500,500])
-# kdCartesian = np.diag([10,10,10])
+kpCartesian = np.diag([500,500,500])
+kdCartesian = np.diag([10,10,10])
 
 # kpCartesian = np.diag([700,700,700])
 # kdCartesian = np.diag([12,12,12])
@@ -119,8 +119,8 @@ MOTOR_KD = [1.0, 1.0, 1.0] * NUM_LEGS
 # kpCartesian = np.diag([1000,1000,1000])
 # kdCartesian = np.diag([20,20,20])
 
-kpCartesian = np.diag([600.0, 600.0, 600.0])
-kdCartesian = np.diag([12.0, 12.0, 12.0])
+# kpCartesian = np.diag([600.0, 600.0, 600.0])
+# kdCartesian = np.diag([12.0, 12.0, 12.0])
 
 ##################################################################################
 # Hip, thigh, calf strings, naming conventions from URDF (don't modify)
