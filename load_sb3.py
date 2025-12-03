@@ -27,7 +27,7 @@ from utils.file_utils import get_latest_model, load_all_results
 LEARNING_ALG = "PPO" #"SAC"
 interm_dir = "./logs/intermediate_models/"
 # path to saved models, i.e. interm_dir + '102824115106'
-log_dir = interm_dir + 'VEL_seed4_05ms_CPG_1M/'
+log_dir = interm_dir + 'cpg/VEL_seed4_05ms_CPG_1M/'
 
 # initialize env configs (render at test time)
 # check ideal conditions, as well as robustness to UNSEEN noise during training
