@@ -15,7 +15,7 @@ from matplotlib import pyplot as plt
 from env.hopf_network import HopfNetwork
 from env.quadruped_gym_env import QuadrupedGymEnv
 
-ADD_CARTESIAN_PD = True
+ADD_CARTESIAN_PD = True    # TODO check
 TIME_STEP = 0.001
 foot_y = 0.0838 # this is the hip length 
 sideSign = np.array([-1, 1, -1, 1]) # get correct hip sign (body right is negative)
@@ -49,7 +49,7 @@ joint_pos   = np.zeros((12, TEST_STEPS))
 ############## Sample Gains
 # joint PD gains
 kp=np.array([100,100,100])
-kd=np.array([2,2,2])
+kd=np.array([2, 2, 2])
 
 # Cartesian PD gains
 kpCartesian = np.diag([500]*3)
@@ -92,7 +92,10 @@ for j in range(TEST_STEPS):
       # Calculate torque contribution from Cartesian PD (Equation 5) [Make sure you are using matrix multiplications]
       des_p  = leg_xyz
       des_v = np.zeros(3)
-      tau += J.T @ ((kpCartesian @ (des_p - p) + kdCartesian @ (des_v - v))) 
+      tau += J.T @ (kpCartesian @ (des_p - p) + kdCartesian @ (des_v - v))
+
+      # clip torques to motor limits
+      tau = np.clip(tau, -env.robot._motor_model._torque_limits[3*i:3*i+3], env.robot._motor_model._torque_limits[3*i:3*i+3])
 
     # Set tau for legi in action vector
     action[3*i:3*i+3] = tau
@@ -112,3 +115,24 @@ for j in range(TEST_STEPS):
 # plt.plot(t,joint_pos[1,:], label='FR thigh')
 # plt.legend()
 # plt.show()
+
+# Plot CPG states r, theta, r_dot and theta_dot
+fig2, axs = plt.subplots(4,1, figsize=(8,10))
+for i in range(4):
+  axs[0].plot(t, r_hist[i,:], label=f'Leg {i}')
+  axs[1].plot(t, theta_hist[i,:], label=f'Leg {i}')
+  axs[2].plot(t, dr_hist[i,:], label=f'Leg {i}')
+  axs[3].plot(t, dtheta_hist[i,:], label=f'Leg {i}')
+
+for ax in axs:
+  ax.legend()
+plt.show()
+
+# Plot actions (torques)
+fig3, axs3 = plt.subplots(4,1, figsize=(8,10))
+for i in range(4):
+  axs3[i].plot(t, action[3*i,:], label=f'Leg {i} Hip')
+  axs3[i].plot(t, action[3*i+1,:], label=f'Leg {i} Thigh')
+  axs3[i].plot(t, action[3*i+2,:], label=f'Leg {i} Calf')
+  axs3[i].legend()
+plt.show()

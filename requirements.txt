@@ -1,5 +1,5 @@
 # PyBullet installed via conda-forge
-numpy==1.26.4
+numpy==2.0.2
 gymnasium>=1.0.0
 # pybullet==3.2.7
 stable-baselines3>=2.4.0

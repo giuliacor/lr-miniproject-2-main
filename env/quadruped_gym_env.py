@@ -436,19 +436,17 @@ class QuadrupedGymEnv(gym.Env):
     action = np.zeros(12)
     for i in range(4):
       # get Jacobian and foot position in leg frame for leg i (see ComputeJacobianAndPosition() in quadruped.py)
-      # [TODO]
-      
+      J, pos = self.robot.ComputeJacobianAndPosition(i)
       # desired foot position i (from RL above)
-      pd = np.zeros(3) # [TODO]
-      
-      # desired foot velocity i
+      pd = des_foot_pos.reshape(4,3)[i]
+      # desired foot velocity i 
       vd = np.zeros(3) # [TODO]
-      
-      # foot velocity in leg frame i (Equation 2)
-      # [TODO]
-      
-      # calculate torques with Cartesian PD (Equation 5) [Make sure you are using matrix multiplications]
-      tau = np.zeros(3) # [TODO]
+      # foot velocity in leg frame i (Equation 2): v = J * q_dot_leg
+      dq_leg = np.array(dq[3*i:3*i+3])
+      foot_vel = J.dot(dq_leg)
+      # calculate torques with Cartesian PD (Equation 5): tau = J^T * (Kp*(pd-pos) + Kd*(vd - v))
+      cartesian_PD = kpCartesian.dot(pd - pos) + kdCartesian.dot(vd - foot_vel)
+      tau = J.T.dot(cartesian_PD)
 
       action[3*i:3*i+3] = tau
 
@@ -491,10 +489,20 @@ class QuadrupedGymEnv(gym.Env):
       z = zs[i]
 
       # call inverse kinematics to get corresponding joint angles
-      q_des = np.zeros(3) # [TODO]
+      q_des = self.robot.ComputeInverseKinematics(i, np.array([x, y, z]))
+      # TODO check if need to add joint offsets
+      # # account for joint offsets in configs (ComputeInverseKinematics returns leg joint angles without global offsets)
+      # joint_offset = self._robot_config.JOINT_OFFSETS[3*i:3*i+3]
+      # q_des_with_offset = q_des + joint_offset
       
-      # Add joint PD contribution to tau
-      tau = np.zeros(3) # [TODO] 
+      # Add joint PD contribution to tau*Equation 4): tau = -kp*(q - q_des) - kd*(dq - 0)
+      q = self.robot.GetMotorAngles()
+      dq = self.robot.GetMotorVelocities()
+      q_leg = np.array(q[3*i:3*i+3])
+      dq_leg = np.array(dq[3*i:3*i+3])
+      kp_arr = np.array(kp[3*i:3*i+3])
+      kd_arr = np.array(kd[3*i:3*i+3])
+      tau = - kp_arr * (q_leg - q_des_with_offset) - kd_arr * (dq_leg)
 
       # add Cartesian PD contribution (as you wish)
       # tau +=
@@ -755,6 +763,12 @@ class QuadrupedGymEnv(gym.Env):
         curTargetPos[2]
     ]
     self._pybullet_client.resetDebugVisualizerCamera(distance, yaw, pitch, base_pos)
+    
+    # Display simulation time on screen
+    sim_time = self.get_sim_time()
+    text = f"Sim Time: {sim_time:.3f}s"
+    self._pybullet_client.addUserDebugText(text, textPosition=[0, 0, 1.5], 
+                                           textColorRGB=[1, 1, 1], textSize=1.5, lifeTime=0)
 
   def _configure_visualizer(self):
     """ Remove all visualizer borders, and zoom in """
