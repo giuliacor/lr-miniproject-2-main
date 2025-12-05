@@ -497,72 +497,87 @@ class QuadrupedGymEnv(gym.Env):
     return max(reward,0) # keep rewards positive
     
   def _reward_lr_course(self, des_vel_x=0.4):
-    vx = self.robot.GetBaseLinearVelocity()[0]
+    # --- state ---
     base_pos = self.robot.GetBasePosition()
+    x = base_pos[0]
     y = base_pos[1]
     z = base_pos[2]
     roll, pitch, yaw = self.robot.GetBaseOrientationRollPitchYaw()
+    vx = self.robot.GetBaseLinearVelocity()[0]
 
+    # forward distance since last step (clip to avoid insane spikes)
+    if not hasattr(self, "_last_x"):
+      self._last_x = x
+    dx = x - self._last_x
+    self._last_x = x
+    dx = np.clip(dx, -0.1, 0.1)
+
+    # gap features (may be zeros if not in GAPS)
     dx_entry, dx_center, dx_exit = self._get_gap_features()
 
-    # 1) Forward progress (main term)
-    progress_reward = 0.1 * np.clip(vx, 0.0, 1.0)
+    # --- 1) forward progress as distance, not just speed ---
+    # only reward forward motion
+    progress_reward = 2.0 * max(dx, 0.0)
 
-    # 2) Very soft speed preference around des_vel_x
-    vel_tracking_reward = 0.02 * np.exp(-(vx - des_vel_x) ** 2 / 0.25)
+    # --- 2) soft preference around desired speed (kept small) ---
+    vel_tracking_reward = 0.01 * np.exp(-(vx - des_vel_x) ** 2 / 0.25)
 
-    # 3) Height (reward staying above fallen threshold)
+    # --- 3) survival bonus: longer episodes = more reward ---
+    alive_bonus = 0.02
+
+    # --- 4) height (stronger when close to ground) ---
     z_min = self._robot_config.IS_FALLEN_HEIGHT
-    height_margin = max(0.0, z - z_min)
-    height_reward = 0.5 * height_margin
+    height_margin = z - z_min
+    if height_margin < 0.0:
+      height_reward = -1.0  # really bad, basically fallen
+    else:
+      # diminishing returns after some safe height
+      height_reward = 0.5 * np.tanh(5.0 * height_margin)
 
-    # 4) Upright (roll/pitch small)
-    upright_reward = -0.1 * (abs(roll) + abs(pitch))
+    # --- 5) upright (roll/pitch small) ---
+    upright_reward = -0.2 * (abs(roll) + abs(pitch))
 
-    # 5) Yaw straight
+    # --- 6) yaw straight ---
     yaw_reward = -0.1 * abs(yaw)
 
-    # 6) Lateral drift
-    drift_reward = -0.01 * abs(y)
+    # --- 7) lateral drift ---
+    drift_reward = -0.02 * abs(y)
 
-    # 7) Energy
+    # --- 8) energy penalty ---
     energy = 0.0
     for tau, vel in zip(self._dt_motor_torques, self._dt_motor_velocities):
-        energy += np.abs(np.dot(tau, vel)) * self._time_step
+      energy += np.abs(np.dot(tau, vel)) * self._time_step
     energy_penalty = 0.01 * energy
 
-    # Gap-aware shaping
+    # --- 9) gap-aware shaping ---
     gap_bonus = 0.0
     gap_penalty = 0.0
 
     if self._terrain == "GAPS":
-      # over gap if entry is behind us and exit is ahead
       over_gap = (dx_entry < 0.0) and (dx_exit > 0.0)
 
-      z_min = self._robot_config.IS_FALLEN_HEIGHT
       safe_height = z_min + 0.05
 
-      # penalize being low while over the gap
+      # penalise being low while over the gap
       if over_gap and z < safe_height:
         gap_penalty -= 2.0
 
-      # small bonus when well-posed just before a gap
+      # small bonus when well prepared just before a gap
       if 0.0 < dx_entry < 0.5 and z > safe_height and abs(roll) + abs(pitch) < 0.3:
         gap_bonus += 0.1
 
-
     reward = (
-      progress_reward
-      + vel_tracking_reward
-      + height_reward
-      + upright_reward
-      + yaw_reward
-      + drift_reward
-      - energy_penalty
-      + gap_bonus
-      + gap_penalty
+        progress_reward
+        + vel_tracking_reward
+        + alive_bonus
+        + height_reward
+        + upright_reward
+        + yaw_reward
+        + drift_reward
+        - energy_penalty
+        + gap_bonus
+        + gap_penalty
     )
-
 
     return max(reward, 0.0)
 
