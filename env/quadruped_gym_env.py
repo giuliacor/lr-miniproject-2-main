@@ -185,6 +185,34 @@ class QuadrupedGymEnv(gym.Env):
         gait="TROT"  # TROT/PACE
     )
 
+  def _get_gap_features(self) -> np.ndarray:
+    """Return distances to next gap (entry, center, exit) along +x."""
+    if not hasattr(self, "_gap_centers") or not hasattr(self, "_gap_width"):
+      return np.zeros(3, dtype=float)
+
+    base_pos = self.robot.GetBasePosition()
+    x = base_pos[0]
+
+    centers = self._gap_centers
+    # indices of gaps that are still in front of us
+    ahead = centers[centers >= x]
+
+    if ahead.size == 0:
+      # already passed all gaps -> just reference the last one
+      center = centers[-1]
+    else:
+      center = ahead[0]
+
+    half_w = 0.5 * float(self._gap_width)
+    x_entry = center - half_w
+    x_exit  = center + half_w
+
+    dx_entry  = x_entry  - x
+    dx_center = center   - x
+    dx_exit   = x_exit   - x
+
+    return np.array([dx_entry, dx_center, dx_exit], dtype=float)
+
   ######################################################################################
   # RL Observation and Action spaces 
   ######################################################################################
@@ -205,7 +233,7 @@ class QuadrupedGymEnv(gym.Env):
       high_cpg_r = np.array([MU_UPP]*4)   # amplitudes
       low_cpg_r  = np.zeros(4)
 
-      high_cpg_trig = np.ones(4)          # sinθ, cosθ ∈ [-1,1]
+      high_cpg_trig = np.ones(4)          # sin, cos in [-1,1]
       low_cpg_trig  = -np.ones(4)
 
       observation_high = np.concatenate((
@@ -259,16 +287,22 @@ class QuadrupedGymEnv(gym.Env):
       high_base_height = np.array([1.5])
       low_base_height  = np.array([0.0])
 
+      # Gap-relative features: dx_entry, dx_center, dx_exit.
+      # Assume we care only within +/- 20 m (more than enough for this setup).
+      high_gap_feat = np.array([20.0, 20.0, 20.0])
+      low_gap_feat  = -high_gap_feat
+
       observation_high = np.concatenate((
           high_q,
           high_qdot,
           high_base_ori,
           high_cpg_r,
-          high_cpg_trig,    # sinθ
-          high_cpg_trig,    # cosθ
+          high_cpg_trig,    # sin
+          high_cpg_trig,    # cos
           high_base_lin_vel,
           high_base_ang_vel,
-          high_base_height
+          high_base_height,
+          high_gap_feat
       )) + OBSERVATION_EPS
 
       observation_low = np.concatenate((
@@ -280,9 +314,10 @@ class QuadrupedGymEnv(gym.Env):
           low_cpg_trig,
           low_base_lin_vel,
           low_base_ang_vel,
-          low_base_height
+          low_base_height,
+          low_gap_feat
       )) - OBSERVATION_EPS
-    
+
     else:
       raise ValueError("observation space not defined or not intended")
 
@@ -336,6 +371,8 @@ class QuadrupedGymEnv(gym.Env):
       base_ang_vel = self.robot.GetBaseAngularVelocity()         # shape (3,)
       base_height  = np.array([self.robot.GetBasePosition()[2]]) # shape (1,)
 
+      gap_feats = self._get_gap_features()                       # shape (3,)
+
       self._observation = np.concatenate((
           q,
           qdot,
@@ -345,8 +382,10 @@ class QuadrupedGymEnv(gym.Env):
           cos_theta,
           base_lin_vel,
           base_ang_vel,
-          base_height
+          base_height,
+          gap_feats
       ))
+
 
     else:
       raise ValueError("observation space not defined or not intended")
@@ -464,6 +503,8 @@ class QuadrupedGymEnv(gym.Env):
     z = base_pos[2]
     roll, pitch, yaw = self.robot.GetBaseOrientationRollPitchYaw()
 
+    dx_entry, dx_center, dx_exit = self._get_gap_features()
+
     # 1) Forward progress (main term)
     progress_reward = 0.1 * np.clip(vx, 0.0, 1.0)
 
@@ -490,15 +531,38 @@ class QuadrupedGymEnv(gym.Env):
         energy += np.abs(np.dot(tau, vel)) * self._time_step
     energy_penalty = 0.01 * energy
 
+    # Gap-aware shaping
+    gap_bonus = 0.0
+    gap_penalty = 0.0
+
+    if self._terrain == "GAPS":
+      # over gap if entry is behind us and exit is ahead
+      over_gap = (dx_entry < 0.0) and (dx_exit > 0.0)
+
+      z_min = self._robot_config.IS_FALLEN_HEIGHT
+      safe_height = z_min + 0.05
+
+      # penalize being low while over the gap
+      if over_gap and z < safe_height:
+        gap_penalty -= 2.0
+
+      # small bonus when well-posed just before a gap
+      if 0.0 < dx_entry < 0.5 and z > safe_height and abs(roll) + abs(pitch) < 0.3:
+        gap_bonus += 0.1
+
+
     reward = (
-        progress_reward
-        + vel_tracking_reward
-        + height_reward
-        + upright_reward
-        + yaw_reward
-        + drift_reward
-        - energy_penalty
+      progress_reward
+      + vel_tracking_reward
+      + height_reward
+      + upright_reward
+      + yaw_reward
+      + drift_reward
+      - energy_penalty
+      + gap_bonus
+      + gap_penalty
     )
+
 
     return max(reward, 0.0)
 
@@ -999,6 +1063,10 @@ class QuadrupedGymEnv(gym.Env):
       -platforms between gaps are between_gaps_width wide"""
     orn = self._pybullet_client.getQuaternionFromEuler([0,0,0])
     
+    # remember geometry for RL
+    self._gap_width = float(gap_width)
+    self._gap_centers = np.zeros(num_gaps)
+
     # start platform
     sh_colBox = self._pybullet_client.createCollisionShape(self._pybullet_client.GEOM_BOX,
             halfExtents=[2,1,0.5])
@@ -1010,12 +1078,11 @@ class QuadrupedGymEnv(gym.Env):
     first_gap = 2
     block_0 = first_gap + gap_width + between_gaps_width / 2
     
-    # keep track of gaps (possibly for RL observation space!)
-    self._gap_centers = np.zeros(num_gaps) 
-
     # loop through
     for i in range(num_gaps):
-      self._gap_centers[i] = first_gap + gap_width / 2 + i*between_gaps_width
+      center_i = first_gap + gap_width / 2 + i*between_gaps_width
+      self._gap_centers[i] = center_i
+
       block_x = block_0 + i * (gap_width + between_gaps_width)   
       sh_colBox = self._pybullet_client.createCollisionShape(self._pybullet_client.GEOM_BOX,
           halfExtents=[between_gaps_width / 2, 1, 0.5])
@@ -1024,18 +1091,7 @@ class QuadrupedGymEnv(gym.Env):
     
       # set friction coeff to 1
       self._pybullet_client.changeDynamics(block2, -1, lateralFriction=self._ground_mu_k)
-    # print("gaps are centered at", self._gap_centers)
 
-    # end platform 
-    end_platform_size = 2
-    sh_colBox = self._pybullet_client.createCollisionShape(self._pybullet_client.GEOM_BOX,
-            halfExtents=[end_platform_size,1,0.5])
-    block2=self._pybullet_client.createMultiBody(baseMass=0,baseCollisionShapeIndex = sh_colBox,
-                              basePosition = [block_x+between_gaps_width/2+end_platform_size/2,0,0.5],baseOrientation=orn)
-    
-    # set friction coeff to 1
-    self._pybullet_client.changeDynamics(block2, -1, lateralFriction=self._ground_mu_k)
-  
   def add_stairs(self, num_stairs=12, stair_height=0.05, stair_width=0.25):
     """Add N stairs, with stair_height and stair_width. long so can't get around """
     x_upp = 20
