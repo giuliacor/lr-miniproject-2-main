@@ -1,33 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2022 Guillaume Bellegarda. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-# 
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice, this
-# list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# 3. Neither the name of the copyright holder nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# Copyright (c) 2022 EPFL, Guillaume Bellegarda
-
 """This file implements the gym environment for a quadruped. """
 
 import os, inspect
@@ -178,7 +148,7 @@ class QuadrupedGymEnv(gym.Env):
     self._is_render = render
     self._is_record_video = record_video
     self._add_noise = add_noise
-    self._using_test_env = test_env
+    self._using_test_env = False
     self._test_flagrun = test_flagrun
     self.goal_id = None
     self._terrain = terrain
@@ -210,7 +180,10 @@ class QuadrupedGymEnv(gym.Env):
     self.reset()
  
   def setupCPG(self):
-    self._cpg = HopfNetwork(use_RL=True)
+    self._cpg = HopfNetwork(
+        use_RL=True,
+        gait="PACE"  # or TROT
+    )
 
   ######################################################################################
   # RL Observation and Action spaces 
@@ -218,13 +191,39 @@ class QuadrupedGymEnv(gym.Env):
   def setupObservationSpace(self):
     """Set up observation space for RL. """
     if self._observation_space_mode == "DEFAULT":
-      observation_high = (np.concatenate((self._robot_config.UPPER_ANGLE_JOINT,
-                                         self._robot_config.VELOCITY_LIMITS,
-                                         np.array([1.0]*4))) +  OBSERVATION_EPS)
-      observation_low = (np.concatenate((self._robot_config.LOWER_ANGLE_JOINT,
-                                         -self._robot_config.VELOCITY_LIMITS,
-                                         np.array([-1.0]*4))) -  OBSERVATION_EPS)
+      high_q = self._robot_config.UPPER_ANGLE_JOINT
+      low_q  = self._robot_config.LOWER_ANGLE_JOINT
 
+      high_qdot = self._robot_config.VELOCITY_LIMITS
+      low_qdot  = -self._robot_config.VELOCITY_LIMITS
+
+      high_base_ori = np.ones(4)
+      low_base_ori  = -np.ones(4)
+
+      # CPG additions
+      high_cpg_r = np.array([MU_UPP]*4)   # amplitudes
+      low_cpg_r  = np.zeros(4)
+
+      high_cpg_trig = np.ones(4)          # sinθ, cosθ ∈ [-1,1]
+      low_cpg_trig  = -np.ones(4)
+
+      observation_high = np.concatenate((
+          high_q,
+          high_qdot,
+          high_base_ori,
+          high_cpg_r,
+          high_cpg_trig,  # sinθ
+          high_cpg_trig   # cosθ
+      )) + OBSERVATION_EPS
+
+      observation_low = np.concatenate((
+          low_q,
+          low_qdot,
+          low_base_ori,
+          low_cpg_r,
+          low_cpg_trig,
+          low_cpg_trig
+      )) - OBSERVATION_EPS
     elif self._observation_space_mode == "LR_COURSE_OBS":
       # [TODO] Set observation upper and lower ranges. What are reasonable limits? 
       # Note 50 is arbitrary below, you may have more or less
@@ -252,9 +251,23 @@ class QuadrupedGymEnv(gym.Env):
   def _get_observation(self):
     """Get observation, depending on obs space selected. """
     if self._observation_space_mode == "DEFAULT":
-      self._observation = np.concatenate((self.robot.GetMotorAngles(), 
-                                          self.robot.GetMotorVelocities(),
-                                          self.robot.GetBaseOrientation() ))
+      q = self.robot.GetMotorAngles()
+      qdot = self.robot.GetMotorVelocities()
+      base_ori = self.robot.GetBaseOrientation()
+
+      r = self._cpg.get_r()
+      theta = self._cpg.get_theta()
+      sin_theta = np.sin(theta)
+      cos_theta = np.cos(theta)
+
+      self._observation = np.concatenate((
+          q,
+          qdot,
+          base_ori,
+          r,
+          sin_theta,
+          cos_theta
+      ))
     elif self._observation_space_mode == "LR_COURSE_OBS":
       # [TODO] Get observation from robot. What are reasonable measurements we could get on hardware?
       # if using the CPG, you can include states with self._cpg.get_r(), for example
@@ -301,11 +314,11 @@ class QuadrupedGymEnv(gym.Env):
     """Decide whether we should stop the episode and reset the environment. """
     return self.is_fallen() 
 
-  def _reward_fwd_locomotion(self, des_vel_x=None):
+  def _reward_fwd_locomotion(self, des_vel_x=0.5):
     """Learn forward locomotion at a desired velocity. """
-    vel_tracking_reward = 0.1 * np.clip(self.robot.GetBaseLinearVelocity()[0], 0.2, 1.0)
+    # vel_tracking_reward = 0.1 * np.clip(self.robot.GetBaseLinearVelocity()[0], 0.2, 1.0)
     # If you want to track a desired velocity 
-    # vel_tracking_reward = 0.05 * np.exp( -1/ 0.25 *  (self.robot.GetBaseLinearVelocity()[0] - des_vel_x)**2 )
+    vel_tracking_reward = 0.05 * np.exp( -1/ 0.25 *  (self.robot.GetBaseLinearVelocity()[0] - des_vel_x)**2 )
     
     # minimize yaw (go straight)
     yaw_reward = -0.2 * np.abs(self.robot.GetBaseOrientationRollPitchYaw()[2]) 
@@ -495,14 +508,12 @@ class QuadrupedGymEnv(gym.Env):
       # joint_offset = self._robot_config.JOINT_OFFSETS[3*i:3*i+3]
       # q_des_with_offset = q_des + joint_offset
       
-      # Add joint PD contribution to tau*Equation 4): tau = -kp*(q - q_des) - kd*(dq - 0)
-      q = self.robot.GetMotorAngles()
-      dq = self.robot.GetMotorVelocities()
-      q_leg = np.array(q[3*i:3*i+3])
-      dq_leg = np.array(dq[3*i:3*i+3])
-      kp_arr = np.array(kp[3*i:3*i+3])
-      kd_arr = np.array(kd[3*i:3*i+3])
-      tau = - kp_arr * (q_leg - q_des_with_offset) - kd_arr * (dq_leg)
+      # Add joint PD contribution to tau
+      q_leg = q[3*i:3*i+3]
+      dq_leg = dq[3*i:3*i+3]
+      kp_leg = kp[3*i:3*i+3]
+      kd_leg = kd[3*i:3*i+3]
+      tau = kp_leg * (q_des - q_leg) - kd_leg * dq_leg
 
       # add Cartesian PD contribution (as you wish)
       # tau +=

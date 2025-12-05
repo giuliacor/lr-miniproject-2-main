@@ -214,19 +214,16 @@ class HopfNetwork():
       r = X[0, i]
       theta = X[1, i]
       # amplitude (use mu from RL, i.e. self._mu_rl[i])
-      mu_i = self._mu_rl[i] if self._mu_rl is not None else self._mu
-      r_dot = self._alpha * (mu_i - r**2) * r
+      # mu_i = self._mu_rl[i] if self._mu_rl is not None else self._mu
+      r_dot = self._alpha * (self._mu_rl[i] - r**2) * r
       # phase (use omega from RL, i.e. self._omega_rl[i])
-      # fall back to nominal omega if RL omega not set
-      omega_i = self._omega_rl[i] if (self._omega_rl is not None and self._omega_rl.any()) else self._omega_swing
-      theta_dot = omega_i
-
-      # loop through other oscillators to add coupling (use same coupling rule as non-RL)
-      theta_sum = 0
+      theta_dot = self._omega_rl[i]
       if self._couple:
-        theta_sum = sum([X[0,j]*self._coupling_strength*np.sin(X[1,j]-theta-self.PHI[i,j]) for j in range(4)])
-
-      theta_dot += theta_sum
+        theta_dot += sum(
+          X[0, j] * self._coupling_strength *
+          np.sin(X[1, j] - theta - self.PHI[i, j])
+          for j in range(4)
+        )
 
       X_dot[:,i] = [r_dot, theta_dot]
 
