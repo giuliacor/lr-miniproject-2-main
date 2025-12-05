@@ -36,12 +36,12 @@ USE_GPU = True # make sure to install all necessary drivers
 #                "observation_space_mode": "LR_COURSE_OBS"}
 env_configs = {
     "motor_control_mode": "CPG",
-    "task_env": "FWD_LOCOMOTION",
-    "observation_space_mode": "DEFAULT",
+    "task_env": "LR_COURSE_TASK",
+    "observation_space_mode": "LR_COURSE_OBS",
     "on_rack": False,
     "render": False,
     "record_video": False,
-    "terrain": None
+    "terrain": "GAPS"
 }
 
 if USE_GPU and torch.cuda.is_available():
@@ -114,9 +114,9 @@ sac_config={"learning_rate":1e-4,
             "device": gpu_arg}
 
 if LEARNING_ALG == "PPO":
-    model = PPO('MlpPolicy', env, seed=SEEDS[3], **ppo_config)
+    model = PPO('MlpPolicy', env, seed=SEEDS[0], **ppo_config)
 elif LEARNING_ALG == "SAC":
-    model = SAC('MlpPolicy', env, seed=SEEDS[3], **sac_config)
+    model = SAC('MlpPolicy', env, seed=SEEDS[0], **sac_config)
 else:
     raise ValueError(LEARNING_ALG + 'not implemented')
 

@@ -182,7 +182,7 @@ class QuadrupedGymEnv(gym.Env):
   def setupCPG(self):
     self._cpg = HopfNetwork(
         use_RL=True,
-        gait="PACE"  # or TROT
+        gait="TROT"  # TROT/PACE
     )
 
   ######################################################################################
@@ -190,6 +190,7 @@ class QuadrupedGymEnv(gym.Env):
   ######################################################################################
   def setupObservationSpace(self):
     """Set up observation space for RL. """
+    # EXTEDNED DEFAULT FOR VELOCITY RL
     if self._observation_space_mode == "DEFAULT":
       high_q = self._robot_config.UPPER_ANGLE_JOINT
       low_q  = self._robot_config.LOWER_ANGLE_JOINT
@@ -225,11 +226,62 @@ class QuadrupedGymEnv(gym.Env):
           low_cpg_trig
       )) - OBSERVATION_EPS
     elif self._observation_space_mode == "LR_COURSE_OBS":
-      # [TODO] Set observation upper and lower ranges. What are reasonable limits? 
-      # Note 50 is arbitrary below, you may have more or less
-      # If using CPG-RL, remember to include limits on these
-      observation_high = (np.zeros(50) + OBSERVATION_EPS)
-      observation_low = (np.zeros(50) -  OBSERVATION_EPS)
+      # OBSERVATION SPACE FOR TASK RL
+      # Joint angles
+      high_q = self._robot_config.UPPER_ANGLE_JOINT
+      low_q  = self._robot_config.LOWER_ANGLE_JOINT
+
+      # Joint velocities
+      high_qdot = self._robot_config.VELOCITY_LIMITS
+      low_qdot  = -self._robot_config.VELOCITY_LIMITS
+
+      # Base orientation (quaternion)
+      high_base_ori = np.ones(4)
+      low_base_ori  = -np.ones(4)
+
+      # CPG amplitudes r (we know μ is in [MU_LOW, MU_UPP])
+      high_cpg_r = np.array([MU_UPP] * 4)
+      low_cpg_r  = np.zeros(4)
+
+      # CPG sinθ, cosθ ∈ [-1, 1]
+      high_cpg_trig = np.ones(4)
+      low_cpg_trig  = -np.ones(4)
+
+      # Base linear velocity (vx, vy, vz)
+      high_base_lin_vel = np.array([MAX_FWD_VELOCITY, 1.0, 1.0])
+      low_base_lin_vel  = -high_base_lin_vel
+
+      # Base angular velocity (wx, wy, wz) – reasonably bounded
+      high_base_ang_vel = np.array([10.0, 10.0, 10.0])
+      low_base_ang_vel  = -high_base_ang_vel
+
+      # Base height – assume between [0, 1.5] m
+      high_base_height = np.array([1.5])
+      low_base_height  = np.array([0.0])
+
+      observation_high = np.concatenate((
+          high_q,
+          high_qdot,
+          high_base_ori,
+          high_cpg_r,
+          high_cpg_trig,    # sinθ
+          high_cpg_trig,    # cosθ
+          high_base_lin_vel,
+          high_base_ang_vel,
+          high_base_height
+      )) + OBSERVATION_EPS
+
+      observation_low = np.concatenate((
+          low_q,
+          low_qdot,
+          low_base_ori,
+          low_cpg_r,
+          low_cpg_trig,
+          low_cpg_trig,
+          low_base_lin_vel,
+          low_base_ang_vel,
+          low_base_height
+      )) - OBSERVATION_EPS
     
     else:
       raise ValueError("observation space not defined or not intended")
@@ -251,6 +303,7 @@ class QuadrupedGymEnv(gym.Env):
   def _get_observation(self):
     """Get observation, depending on obs space selected. """
     if self._observation_space_mode == "DEFAULT":
+      # EXTEDNED DEFAULT FOR VELOCITY RL
       q = self.robot.GetMotorAngles()
       qdot = self.robot.GetMotorVelocities()
       base_ori = self.robot.GetBaseOrientation()
@@ -269,10 +322,32 @@ class QuadrupedGymEnv(gym.Env):
           cos_theta
       ))
     elif self._observation_space_mode == "LR_COURSE_OBS":
-      # [TODO] Get observation from robot. What are reasonable measurements we could get on hardware?
-      # if using the CPG, you can include states with self._cpg.get_r(), for example
-      # 50 is arbitrary
-      self._observation = np.zeros(50)
+      # OBSERVATION SPACE FOR TASK RL
+      q        = self.robot.GetMotorAngles()
+      qdot     = self.robot.GetMotorVelocities()
+      base_ori = self.robot.GetBaseOrientation()
+
+      r        = self._cpg.get_r()
+      theta    = self._cpg.get_theta()
+      sin_theta = np.sin(theta)
+      cos_theta = np.cos(theta)
+
+      base_lin_vel = self.robot.GetBaseLinearVelocity()          # shape (3,)
+      base_ang_vel = self.robot.GetBaseAngularVelocity()         # shape (3,)
+      base_height  = np.array([self.robot.GetBasePosition()[2]]) # shape (1,)
+
+      self._observation = np.concatenate((
+          q,
+          qdot,
+          base_ori,
+          r,
+          sin_theta,
+          cos_theta,
+          base_lin_vel,
+          base_ang_vel,
+          base_height
+      ))
+
     else:
       raise ValueError("observation space not defined or not intended")
 
@@ -382,11 +457,50 @@ class QuadrupedGymEnv(gym.Env):
     
     return max(reward,0) # keep rewards positive
     
-  def _reward_lr_course(self):
-    """ Implement your reward function here. How will you improve upon the above? """
-    # [TODO] add your reward function. 
-    
-    return 0
+  def _reward_lr_course(self, des_vel_x=0.4):
+    vx = self.robot.GetBaseLinearVelocity()[0]
+    base_pos = self.robot.GetBasePosition()
+    y = base_pos[1]
+    z = base_pos[2]
+    roll, pitch, yaw = self.robot.GetBaseOrientationRollPitchYaw()
+
+    # 1) Forward progress (main term)
+    progress_reward = 0.1 * np.clip(vx, 0.0, 1.0)
+
+    # 2) Very soft speed preference around des_vel_x
+    vel_tracking_reward = 0.02 * np.exp(-(vx - des_vel_x) ** 2 / 0.25)
+
+    # 3) Height (reward staying above fallen threshold)
+    z_min = self._robot_config.IS_FALLEN_HEIGHT
+    height_margin = max(0.0, z - z_min)
+    height_reward = 0.5 * height_margin
+
+    # 4) Upright (roll/pitch small)
+    upright_reward = -0.1 * (abs(roll) + abs(pitch))
+
+    # 5) Yaw straight
+    yaw_reward = -0.1 * abs(yaw)
+
+    # 6) Lateral drift
+    drift_reward = -0.01 * abs(y)
+
+    # 7) Energy
+    energy = 0.0
+    for tau, vel in zip(self._dt_motor_torques, self._dt_motor_velocities):
+        energy += np.abs(np.dot(tau, vel)) * self._time_step
+    energy_penalty = 0.01 * energy
+
+    reward = (
+        progress_reward
+        + vel_tracking_reward
+        + height_reward
+        + upright_reward
+        + yaw_reward
+        + drift_reward
+        - energy_penalty
+    )
+
+    return max(reward, 0.0)
 
   def _reward(self):
     """ Get reward depending on task"""
