@@ -41,7 +41,7 @@ env_configs = {
     "on_rack": False,
     "render": False,
     "record_video": False,
-    "terrain": "GAPS"
+    "terrain": "SLOPES"
 }
 
 if USE_GPU and torch.cuda.is_available():

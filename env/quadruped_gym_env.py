@@ -185,33 +185,23 @@ class QuadrupedGymEnv(gym.Env):
         gait="TROT"  # TROT/PACE
     )
 
-  def _get_gap_features(self) -> np.ndarray:
-    """Return distances to next gap (entry, center, exit) along +x."""
-    if not hasattr(self, "_gap_centers") or not hasattr(self, "_gap_width"):
-      return np.zeros(3, dtype=float)
+  def _get_slope_features(self) -> np.ndarray:
+    """
+    Return terrain-related features for SLOPES.
+    We keep 3 dims to match the previous GAP feature size:
+        [pitch, sin(pitch), cos(pitch)]
 
-    base_pos = self.robot.GetBasePosition()
-    x = base_pos[0]
+    If terrain is not SLOPES, return zeros (keeps obs dim consistent).
+    """
+    if self._terrain != "SLOPES":
+        return np.zeros(3, dtype=float)
 
-    centers = self._gap_centers
-    # indices of gaps that are still in front of us
-    ahead = centers[centers >= x]
+    # Extract roll, pitch, yaw from base orientation
+    roll, pitch, yaw = self.robot.GetBaseOrientationRollPitchYaw()
 
-    if ahead.size == 0:
-      # already passed all gaps -> just reference the last one
-      center = centers[-1]
-    else:
-      center = ahead[0]
+    # Meaningful features on slopes:
+    return np.array([pitch, np.sin(pitch), np.cos(pitch)], dtype=float)
 
-    half_w = 0.5 * float(self._gap_width)
-    x_entry = center - half_w
-    x_exit  = center + half_w
-
-    dx_entry  = x_entry  - x
-    dx_center = center   - x
-    dx_exit   = x_exit   - x
-
-    return np.array([dx_entry, dx_center, dx_exit], dtype=float)
 
   ######################################################################################
   # RL Observation and Action spaces 
@@ -253,6 +243,7 @@ class QuadrupedGymEnv(gym.Env):
           low_cpg_trig,
           low_cpg_trig
       )) - OBSERVATION_EPS
+
     elif self._observation_space_mode == "LR_COURSE_OBS":
       # OBSERVATION SPACE FOR TASK RL
       # Joint angles
@@ -271,7 +262,7 @@ class QuadrupedGymEnv(gym.Env):
       high_cpg_r = np.array([MU_UPP] * 4)
       low_cpg_r  = np.zeros(4)
 
-      # CPG sinθ, cosθ ∈ [-1, 1]
+      # CPG sin, cos in [-1, 1]
       high_cpg_trig = np.ones(4)
       low_cpg_trig  = -np.ones(4)
 
@@ -279,18 +270,17 @@ class QuadrupedGymEnv(gym.Env):
       high_base_lin_vel = np.array([MAX_FWD_VELOCITY, 1.0, 1.0])
       low_base_lin_vel  = -high_base_lin_vel
 
-      # Base angular velocity (wx, wy, wz) – reasonably bounded
+      # Base angular velocity (wx, wy, wz)
       high_base_ang_vel = np.array([10.0, 10.0, 10.0])
       low_base_ang_vel  = -high_base_ang_vel
 
-      # Base height – assume between [0, 1.5] m
+      # Base height
       high_base_height = np.array([1.5])
       low_base_height  = np.array([0.0])
 
-      # Gap-relative features: dx_entry, dx_center, dx_exit.
-      # Assume we care only within +/- 20 m (more than enough for this setup).
-      high_gap_feat = np.array([20.0, 20.0, 20.0])
-      low_gap_feat  = -high_gap_feat
+      # SLOPE-related features: [pitch, sin(pitch), cos(pitch)]
+      high_slope_feat = np.array([2.0, 1.0, 1.0])
+      low_slope_feat  = np.array([-2.0, -1.0, -1.0])
 
       observation_high = np.concatenate((
           high_q,
@@ -302,7 +292,7 @@ class QuadrupedGymEnv(gym.Env):
           high_base_lin_vel,
           high_base_ang_vel,
           high_base_height,
-          high_gap_feat
+          high_slope_feat
       )) + OBSERVATION_EPS
 
       observation_low = np.concatenate((
@@ -315,7 +305,7 @@ class QuadrupedGymEnv(gym.Env):
           low_base_lin_vel,
           low_base_ang_vel,
           low_base_height,
-          low_gap_feat
+          low_slope_feat
       )) - OBSERVATION_EPS
 
     else:
@@ -356,6 +346,7 @@ class QuadrupedGymEnv(gym.Env):
           sin_theta,
           cos_theta
       ))
+
     elif self._observation_space_mode == "LR_COURSE_OBS":
       # OBSERVATION SPACE FOR TASK RL
       q        = self.robot.GetMotorAngles()
@@ -367,11 +358,12 @@ class QuadrupedGymEnv(gym.Env):
       sin_theta = np.sin(theta)
       cos_theta = np.cos(theta)
 
-      base_lin_vel = self.robot.GetBaseLinearVelocity()          # shape (3,)
-      base_ang_vel = self.robot.GetBaseAngularVelocity()         # shape (3,)
-      base_height  = np.array([self.robot.GetBasePosition()[2]]) # shape (1,)
+      base_lin_vel = self.robot.GetBaseLinearVelocity()          # (3,)
+      base_ang_vel = self.robot.GetBaseAngularVelocity()         # (3,)
+      base_height  = np.array([self.robot.GetBasePosition()[2]]) # (1,)
 
-      gap_feats = self._get_gap_features()                       # shape (3,)
+      # SLOPES-specific features (or zeros on other terrains)
+      slope_feats = self._get_slope_features()                   # (3,)
 
       self._observation = np.concatenate((
           q,
@@ -383,9 +375,8 @@ class QuadrupedGymEnv(gym.Env):
           base_lin_vel,
           base_ang_vel,
           base_height,
-          gap_feats
+          slope_feats
       ))
-
 
     else:
       raise ValueError("observation space not defined or not intended")
@@ -497,75 +488,121 @@ class QuadrupedGymEnv(gym.Env):
     return max(reward,0) # keep rewards positive
     
   def _reward_lr_course(self, des_vel_x=0.4):
+    """
+    Reward for LR_COURSE on SLOPES terrain:
+      - go forward along +x (up the slope, over the top, and down)
+      - avoid sliding backwards
+      - avoid uncontrolled downhill sliding
+      - stay stable (small roll, reasonable pitch, small yaw, low drift)
+      - use energy efficiently
+    """
     # --- state ---
     base_pos = self.robot.GetBasePosition()
     x = base_pos[0]
     y = base_pos[1]
     z = base_pos[2]
     roll, pitch, yaw = self.robot.GetBaseOrientationRollPitchYaw()
-    vx = self.robot.GetBaseLinearVelocity()[0]
+    base_lin_vel = self.robot.GetBaseLinearVelocity()
+    vx = base_lin_vel[0]
 
-    # forward distance since last step (clip to avoid insane spikes)
+    # --- forward distance since last step (clipped) ---
     if not hasattr(self, "_last_x"):
       self._last_x = x
     dx = x - self._last_x
     self._last_x = x
     dx = np.clip(dx, -0.1, 0.1)
 
-    # gap features (may be zeros if not in GAPS)
-    dx_entry, dx_center, dx_exit = self._get_gap_features()
+    # --- classify where we are on the slope course (approximate) ---
+    # these correspond to the geometry created in add_slopes()
+    up_start = 0.5
+    up_end   = 3.2   # end of uphill ramp
+    down_start = 4.0
+    down_end   = 6.5 # end of downhill ramp
 
-    # --- 1) forward progress as distance, not just speed ---
-    # only reward forward motion
-    progress_reward = 2.0 * max(dx, 0.0)
+    slope_dir = 0.0  # 0: flat/unknown, +1: uphill section, -1: downhill section
+    if self._terrain == "SLOPES":
+      if up_start <= x <= up_end:
+        slope_dir = 1.0   # uphill
+      elif down_start <= x <= down_end:
+        slope_dir = -1.0  # downhill
 
-    # --- 2) soft preference around desired speed (kept small) ---
-    vel_tracking_reward = 0.01 * np.exp(-(vx - des_vel_x) ** 2 / 0.25)
+    # =====================================================================
+    # 1) FORWARD PROGRESS (up, over, and down)
+    # =====================================================================
+    # Reward any forward motion; zero reward for backward motion (handled separately)
+    progress_reward = 3.0 * max(dx, 0.0)
 
-    # --- 3) survival bonus: longer episodes = more reward ---
+    # =====================================================================
+    # 2) VELOCITY TRACKING (controls both up and down)
+    # =====================================================================
+    # Encourage moving around des_vel_x, discourage too slow or too fast.
+    vel_tracking_reward = 0.02 * np.exp(-(vx - des_vel_x)**2 / 0.25)
+
+    # =====================================================================
+    # 3) ALIVE + HEIGHT
+    # =====================================================================
     alive_bonus = 0.02
 
-    # --- 4) height (stronger when close to ground) ---
     z_min = self._robot_config.IS_FALLEN_HEIGHT
     height_margin = z - z_min
     if height_margin < 0.0:
-      height_reward = -1.0  # really bad, basically fallen
+      height_reward = -1.0  # basically fallen
     else:
-      # diminishing returns after some safe height
       height_reward = 0.5 * np.tanh(5.0 * height_margin)
 
-    # --- 5) upright (roll/pitch small) ---
-    upright_reward = -0.2 * (abs(roll) + abs(pitch))
+    # =====================================================================
+    # 4) POSTURE: ROLL AND PITCH
+    # =====================================================================
+    # Roll: always strongly penalized (lateral tipping)
+    roll_pen = 0.3 * abs(roll)
 
-    # --- 6) yaw straight ---
-    yaw_reward = -0.1 * abs(yaw)
+    # Pitch: want different preferred pitch on uphill vs downhill
+    if slope_dir != 0.0:
+      # desired pitch: lean into slope a bit (about 8-10 degrees)
+      desired_pitch = slope_dir * 0.15  # rad
+      pitch_error = pitch - desired_pitch
+      pitch_pen = 0.1 * abs(pitch_error)
+    else:
+      # on flat regions, prefer pitch near zero
+      pitch_pen = 0.05 * abs(pitch)
 
-    # --- 7) lateral drift ---
-    drift_reward = -0.02 * abs(y)
+    upright_reward = -(roll_pen + pitch_pen)
 
-    # --- 8) energy penalty ---
+    # =====================================================================
+    # 5) HEADING AND DRIFT
+    # =====================================================================
+    yaw_reward = -0.1 * abs(yaw)      # keep heading roughly straight
+    drift_reward = -0.02 * abs(y)     # avoid drifting sideways
+
+    # =====================================================================
+    # 6) ENERGY PENALTY
+    # =====================================================================
     energy = 0.0
     for tau, vel in zip(self._dt_motor_torques, self._dt_motor_velocities):
       energy += np.abs(np.dot(tau, vel)) * self._time_step
     energy_penalty = 0.01 * energy
 
-    # --- 9) gap-aware shaping ---
-    gap_bonus = 0.0
-    gap_penalty = 0.0
+    # =====================================================================
+    # 7) SLOPE-SPECIFIC SHAPING: SLIDING CONTROL
+    # =====================================================================
+    slope_penalty = 0.0
 
-    if self._terrain == "GAPS":
-      over_gap = (dx_entry < 0.0) and (dx_exit > 0.0)
+    if self._terrain == "SLOPES":
+      # (a) backward sliding (mainly uphill) is very bad
+      if dx < 0.0:
+        # dx is clipped to [-0.1, 0.1], so abs(dx)/0.1 ∈ [0,1]
+        slope_penalty -= 3.0 * (abs(dx) / 0.1)
 
-      safe_height = z_min + 0.05
+      # (b) uncontrolled forward sliding on downhill
+      if slope_dir < 0.0:
+        # allow some margin above desired speed, penalize excessive downhill speed
+        speed_margin = 0.3
+        excess_v = max(0.0, abs(vx) - (des_vel_x + speed_margin))
+        slope_penalty -= 1.5 * excess_v
 
-      # penalise being low while over the gap
-      if over_gap and z < safe_height:
-        gap_penalty -= 2.0
-
-      # small bonus when well prepared just before a gap
-      if 0.0 < dx_entry < 0.5 and z > safe_height and abs(roll) + abs(pitch) < 0.3:
-        gap_bonus += 0.1
-
+    # =====================================================================
+    # Sum all terms
+    # =====================================================================
     reward = (
         progress_reward
         + vel_tracking_reward
@@ -575,11 +612,12 @@ class QuadrupedGymEnv(gym.Env):
         + yaw_reward
         + drift_reward
         - energy_penalty
-        + gap_bonus
-        + gap_penalty
+        + slope_penalty
     )
 
+    # keep rewards non-negative
     return max(reward, 0.0)
+
 
   def _reward(self):
     """ Get reward depending on task"""
