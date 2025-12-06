@@ -78,7 +78,7 @@ Motor control modes:
         torques are computed based on inverse kinematics + joint PD (or you can add Cartesian PD)
 """
 
-EPISODE_LENGTH = 10   # how long before we reset the environment (max episode length for RL)
+EPISODE_LENGTH = 15   # how long before we reset the environment (max episode length for RL)
 MAX_FWD_VELOCITY = 1  # to avoid exploiting simulator dynamics, cap max reward for body velocity 
 
 # CPG quantities
@@ -489,7 +489,10 @@ class QuadrupedGymEnv(gym.Env):
     
   def _reward_lr_course(self, des_vel_x=0.4):
     """
-    Reward for LR_COURSE on SLOPES terrain:
+    Reward for LR_COURSE on SLOPES terrain, calibrated so that
+    total episode returns (15 s) are roughly in the 0–30 / 0–50 range,
+    similar to the velocity task.
+
       - go forward along +x (up the slope, over the top, and down)
       - avoid sliding backwards
       - avoid uncontrolled downhill sliding
@@ -512,67 +515,68 @@ class QuadrupedGymEnv(gym.Env):
     self._last_x = x
     dx = np.clip(dx, -0.1, 0.1)
 
-    # --- classify where we are on the slope course (approximate) ---
+    # --- locate roughly where we are on the slope course ---
     # these correspond to the geometry created in add_slopes()
-    up_start = 0.5
-    up_end   = 3.2   # end of uphill ramp
+    up_start   = 0.5
+    up_end     = 3.2   # end of uphill ramp
     down_start = 4.0
-    down_end   = 6.5 # end of downhill ramp
+    down_end   = 6.5   # end of downhill ramp
 
-    slope_dir = 0.0  # 0: flat/unknown, +1: uphill section, -1: downhill section
+    slope_dir = 0.0  # 0: flat/unknown, +1: uphill, -1: downhill
     if self._terrain == "SLOPES":
       if up_start <= x <= up_end:
-        slope_dir = 1.0   # uphill
+        slope_dir = 1.0
       elif down_start <= x <= down_end:
-        slope_dir = -1.0  # downhill
+        slope_dir = -1.0
 
     # =====================================================================
-    # 1) FORWARD PROGRESS (up, over, and down)
+    # 1) FORWARD PROGRESS
     # =====================================================================
-    # Reward any forward motion; zero reward for backward motion (handled separately)
-    progress_reward = 3.0 * max(dx, 0.0)
+    # max dx = 0.1 -> max progress_reward = 0.02
+    progress_reward = 0.2 * max(dx, 0.0)
 
     # =====================================================================
-    # 2) VELOCITY TRACKING (controls both up and down)
+    # 2) VELOCITY TRACKING
     # =====================================================================
-    # Encourage moving around des_vel_x, discourage too slow or too fast.
-    vel_tracking_reward = 0.02 * np.exp(-(vx - des_vel_x)**2 / 0.25)
+    # similar scale to old velocity task
+    vel_tracking_reward = 0.01 * np.exp(-(vx - des_vel_x)**2 / 0.25)
 
     # =====================================================================
     # 3) ALIVE + HEIGHT
     # =====================================================================
-    alive_bonus = 0.02
+    # small alive bonus per step
+    alive_bonus = 0.005
 
     z_min = self._robot_config.IS_FALLEN_HEIGHT
     height_margin = z - z_min
     if height_margin < 0.0:
-      height_reward = -1.0  # basically fallen
+      height_reward = -1.0  # essentially fallen
     else:
-      height_reward = 0.5 * np.tanh(5.0 * height_margin)
+      # max ~0.1 when comfortably above fallen height
+      height_reward = 0.1 * np.tanh(5.0 * height_margin)
 
     # =====================================================================
     # 4) POSTURE: ROLL AND PITCH
     # =====================================================================
-    # Roll: always strongly penalized (lateral tipping)
-    roll_pen = 0.3 * abs(roll)
+    # roll: lateral tipping is always bad
+    roll_pen = 0.25 * abs(roll)
 
-    # Pitch: want different preferred pitch on uphill vs downhill
+    # pitch: lean a bit into slope, but not too much
     if slope_dir != 0.0:
-      # desired pitch: lean into slope a bit (about 8-10 degrees)
       desired_pitch = slope_dir * 0.15  # rad
       pitch_error = pitch - desired_pitch
-      pitch_pen = 0.1 * abs(pitch_error)
+      pitch_pen = 0.06 * abs(pitch_error)
     else:
       # on flat regions, prefer pitch near zero
-      pitch_pen = 0.05 * abs(pitch)
+      pitch_pen = 0.04 * abs(pitch)
 
     upright_reward = -(roll_pen + pitch_pen)
 
     # =====================================================================
     # 5) HEADING AND DRIFT
     # =====================================================================
-    yaw_reward = -0.1 * abs(yaw)      # keep heading roughly straight
-    drift_reward = -0.02 * abs(y)     # avoid drifting sideways
+    yaw_reward = -0.06 * abs(yaw)      # keep heading roughly straight
+    drift_reward = -0.01 * abs(y)      # avoid sideways drift
 
     # =====================================================================
     # 6) ENERGY PENALTY
@@ -580,7 +584,8 @@ class QuadrupedGymEnv(gym.Env):
     energy = 0.0
     for tau, vel in zip(self._dt_motor_torques, self._dt_motor_velocities):
       energy += np.abs(np.dot(tau, vel)) * self._time_step
-    energy_penalty = 0.01 * energy
+    # modest penalty so energy matters but doesn't dominate
+    energy_penalty = 0.008 * energy
 
     # =====================================================================
     # 7) SLOPE-SPECIFIC SHAPING: SLIDING CONTROL
@@ -588,17 +593,16 @@ class QuadrupedGymEnv(gym.Env):
     slope_penalty = 0.0
 
     if self._terrain == "SLOPES":
-      # (a) backward sliding (mainly uphill) is very bad
+      # (a) backward sliding is bad everywhere, especially on the uphill
       if dx < 0.0:
-        # dx is clipped to [-0.1, 0.1], so abs(dx)/0.1 ∈ [0,1]
-        slope_penalty -= 3.0 * (abs(dx) / 0.1)
+        # dx is in [-0.1, 0.1]; normalize by 0.1 to get [0, 1]
+        slope_penalty -= 1.5 * (abs(dx) / 0.1)
 
       # (b) uncontrolled forward sliding on downhill
       if slope_dir < 0.0:
-        # allow some margin above desired speed, penalize excessive downhill speed
         speed_margin = 0.3
         excess_v = max(0.0, abs(vx) - (des_vel_x + speed_margin))
-        slope_penalty -= 1.5 * excess_v
+        slope_penalty -= 0.8 * excess_v
 
     # =====================================================================
     # Sum all terms
