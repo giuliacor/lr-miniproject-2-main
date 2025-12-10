@@ -1,0 +1,45 @@
+ ###################################################### WALK ###################################################################
+ 
+  def __init__(self,
+                mu=1**2,                 # intrinsic amplitude, converges to sqrt(mu)
+                omega_swing=5*2*np.pi,   # frequency in swing phase (can edit)
+                omega_stance=3*2*np.pi,  # frequency in stance phase (can edit)
+                gait="WALK",             # Gait, can be TROT, WALK, PACE, BOUND, etc.
+                alpha=50,                # amplitude convergence factor
+                coupling_strength=1,     # coefficient to multiply coupling matrix
+                couple=True,             # whether oscillators should be coupled
+                time_step=0.001,         # time step 
+                ground_clearance=0.06,   # foot swing height 
+                ground_penetration=0.01, # foot stance penetration into ground 
+                robot_height=0.3,        # in nominal case (standing) 
+                des_step_len=0.05,       # desired step length 
+                max_step_len_rl=0.1,     # max step length, for RL scaling 
+                use_RL=False             # whether to learn parameters with RL 
+                ):
+
+###################################################### WALK (J PD) ###################################################################
+
+# joint PD gains
+kp = np.array([200,350,350])
+kd = np.array([5,5,5])
+
+###################################################### WALK (C PD) ###################################################################
+
+# Cartesian PD gains
+kp_front = np.diag([3000, 1000, 4000])
+kd_front = np.diag([12,12,12])
+
+# HIND LEGS = indices 2 (RR), 3 (RL)
+kp_hind = kp_front
+kd_hind = kd_front
+
+#####################################################################################################################################
+
+1) Average forward velocity: 0.42449904179805165
+Mean forward body velocity: 0.5101396858733273 m/s
+
+2) Average forward velocity: 0.25321234087256056
+Mean forward body velocity: 0.5127012355309879 m/s
+
+3) Average forward velocity: 0.5030711062940353
+Mean forward body velocity: 0.5100802133832733 m/s

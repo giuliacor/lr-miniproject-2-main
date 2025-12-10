@@ -1,33 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2022 Guillaume Bellegarda. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-# 
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice, this
-# list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# 3. Neither the name of the copyright holder nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# Copyright (c) 2022 EPFL, Guillaume Bellegarda
-
 """
 CPG in polar coordinates based on: 
 CPG-RL: Learning Central Pattern Generators for Quadruped Locomotion 
@@ -36,6 +6,12 @@ https://ieeexplore.ieee.org/abstract/document/9932888
 """
 
 import numpy as np
+import json
+
+def load_params(file_path):
+    with open(file_path, "r") as f:
+        return json.load(f)
+params = load_params("params_bound.json")
 
 # for RL 
 MU_LOW = 1
@@ -47,20 +23,20 @@ class HopfNetwork():
   (Front Right, Front Left, Rear Right, Rear Left)
   """
   def __init__(self,
-                mu=1**2,                 # intrinsic amplitude, converges to sqrt(mu)
-                omega_swing=5*2*np.pi,   # frequency in swing phase (can edit)
-                omega_stance=2*2*np.pi,  # frequency in stance phase (can edit)
-                gait="TROT",             # Gait, can be TROT, WALK, PACE, BOUND, etc.
-                alpha=50,                # amplitude convergence factor
-                coupling_strength=1,     # coefficient to multiply coupling matrix
-                couple=True,             # whether oscillators should be coupled
-                time_step=0.001,         # time step 
-                ground_clearance=0.07,   # foot swing height 
-                ground_penetration=0.01, # foot stance penetration into ground 
-                robot_height=0.3,        # in nominal case (standing) 
-                des_step_len=0.05,       # desired step length 
-                max_step_len_rl=0.1,     # max step length, for RL scaling 
-                use_RL=False             # whether to learn parameters with RL 
+                mu                 = params["cpg_params"]["mu"],                   # intrinsic amplitude, converges to sqrt(mu)
+                omega_swing        = params["cpg_params"]["omega_swing"]*2*np.pi,          # frequency in swing phase (can edit)
+                omega_stance       = params["cpg_params"]["omega_stance"]*2*np.pi,         # frequency in stance phase (can edit)
+                gait               = params["cpg_params"]["gait"],                 # Gait, can be TROT, WALK, PACE, BOUND, etc.
+                alpha              = params["cpg_params"]["alpha"],                # amplitude convergence factor
+                coupling_strength  = params["cpg_params"]["coupling_strength"],    # coefficient to multiply coupling matrix
+                couple             = params["cpg_params"]["couple"],               # whether oscillators should be coupled
+                time_step          = params["cpg_params"]["time_step"],            # time step
+                ground_clearance   = params["cpg_params"]["ground_clearance"],     # foot swing height 
+                ground_penetration = params["cpg_params"]["ground_penetration"],   # foot stance penetration into ground 
+                robot_height       = params["cpg_params"]["robot_height"],         # in nominal case (standing) 
+                des_step_len       = params["cpg_params"]["des_step_len"],         # desired step length 
+                max_step_len_rl    = params["cpg_params"]["max_step_len_rl"],      # max step length, for RL scaling 
+                use_RL             = params["cpg_params"]["use_RL"]                # whether to learn parameters with RL 
                 ):
     
     # initialize CPG data structures: amplitude is row 0, and phase is row 1
@@ -96,13 +72,33 @@ class HopfNetwork():
       self.X[0,:] = MU_LOW # mapping MU_LOW=1 to MU_UPP=2
 
   def _set_gait(self,gait):
-    """ For coupling oscillators in phase space. 
-    [TODO] Update all coupling matrices.
-    """
-    self.PHI_trot = np.zeros((4,4)) # [TODO]
-    self.PHI_walk = np.zeros((4,4)) # [TODO]
-    self.PHI_bound = np.zeros((4,4)) # [TODO]
-    self.PHI_pace = np.zeros((4,4)) # [TODO]
+    self.PHI_trot = np.array([
+      [0.0,    np.pi,  np.pi,  0.0   ],
+      [-np.pi, 0.0,    0.0,    -np.pi],
+      [-np.pi, 0.0,    0.0,    -np.pi],
+      [0.0,    np.pi,  np.pi,  0.0   ]
+    ])
+
+    self.PHI_walk = np.array([
+      [0.0,        -np.pi,       np.pi/2,     -np.pi/2 ],
+      [np.pi,      0.0,          3*np.pi/2,   np.pi/2  ],
+      [-np.pi/2,   -3*np.pi/2,   0.0,         -np.pi   ],
+      [np.pi/2,    -np.pi/2,     np.pi,       0.0      ]
+    ])
+
+    self.PHI_pace = np.array([
+      [0.0,    np.pi,  0.0,    np.pi ],
+      [-np.pi, 0.0,   -np.pi,  0.0   ],
+      [0.0,    np.pi,  0.0,    np.pi ],
+      [-np.pi, 0.0,   -np.pi,  0.0   ]
+    ])
+
+    self.PHI_bound = np.array([
+      [0.0,    0.0,    np.pi,  np.pi ],
+      [0.0,    0.0,    np.pi,  np.pi ],
+      [-np.pi, -np.pi, 0.0,    0.0   ],
+      [-np.pi, -np.pi, 0.0,    0.0   ]
+    ])
 
     if gait == "TROT":
       self.PHI = self.PHI_trot
@@ -124,12 +120,18 @@ class HopfNetwork():
       self._integrate_hopf_equations_rl()
     
     # map CPG variables to Cartesian foot xz positions (Equations 8, 9) 
-    x = np.zeros(4) # [TODO]
-    z = np.zeros(4) # [TODO]
+    x = - self.get_r() * np.cos(self.get_theta())   
+    z = np.zeros(4)
+    for i in range(4):
+      flag = np.sin(self.get_theta()[i])
+      if flag > 0:
+        z[i] = self._ground_clearance * flag - self._robot_height
+      else:
+        z[i] = self._ground_penetration * flag - self._robot_height
 
     # scale x by step length
     if not self.use_RL:
-      # use des step len, fixed # [TODO]
+      x = x * self._des_step_len
       return x, z
     else:
       # RL uses amplitude to set max step length
@@ -146,21 +148,27 @@ class HopfNetwork():
     # loop through each leg's oscillator
     for i in range(4):
       # get r_i, theta_i from X
-      r, theta = 0, 0 # [TODO]
+      r, theta     = X[0,i], X[1,i]
       # compute r_dot (Equation 6)
-      r_dot = 0 # [TODO]
+      r_dot = self._alpha * (self._mu - r**2) * r
       # determine whether oscillator i is in swing or stance phase to set natural frequency omega_swing or omega_stance (see Section 3)
-      theta_dot = 0 # [TODO]
+      if theta < np.pi:
+        theta_dot = self._omega_swing
+      else:
+        theta_dot = self._omega_stance
 
       # loop through other oscillators to add coupling (Equation 7)
+      theta_sum = 0
       if self._couple:
-        theta_dot += 0 # [TODO]
+        theta_sum = sum([X[0,j]*self._coupling_strength*np.sin(X[1,j]-theta-self.PHI[i,j]) for j in range(4)])
+
+      theta_dot += theta_sum
 
       # set X_dot[:,i]
       X_dot[:,i] = [r_dot, theta_dot]
 
     # integrate 
-    self.X = np.zeros((2,4)) # [TODO]
+    self.X = X + (X_dot_prev + X_dot)/2 * self._dt
     self.X_dot = X_dot
     # mod phase variables to keep between 0 and 2pi
     self.X[1,:] = self.X[1,:] % (2*np.pi)

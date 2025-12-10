@@ -1,0 +1,82 @@
+###################################################### BOUND ###################################################################
+
+  def __init__(self,
+                mu=1**2,                 # intrinsic amplitude, converges to sqrt(mu)
+                omega_swing= 6 * 2*np.pi,   # frequency in swing phase (can edit)
+                omega_stance= 7* 2*np.pi,  # frequency in stance phase (can edit)             # 12* 2*np.pi
+                gait="BOUND",             # Gait, can be TROT, WALK, PACE, BOUND, etc.
+                alpha=50,                # amplitude convergence factor
+                coupling_strength=1,     # coefficient to multiply coupling matrix
+                couple=True,             # whether oscillators should be coupled
+                time_step=0.001,         # time step 
+                ground_clearance=0.06,   # foot swing height 
+                ground_penetration=0.01, # foot stance penetration into ground 
+                robot_height=0.20,        # in nominal case (standing) 
+                des_step_len=0.06,       # desired step length 
+                max_step_len_rl=0.1,     # max step length, for RL scaling 
+                use_RL=False             # whether to learn parameters with RL 
+                ):
+
+###################################################### BOUND (J PD) ###################################################################
+
+# joint PD gains
+# FRONT LEGS
+kp_joint_front = np.array([500, 2000, 525])
+kd_joint_front = np.array([10,   10,   8])
+
+# HIND LEGS
+kp_joint_hind  = np.array([500, 2000, 525]) 
+kd_joint_hind  = np.array([10,   10,   8])
+
+
+###################################################### BOUND (C PD) ###################################################################
+
+# Cartesian PD gains
+kp_front = np.diag([2000, 1000, 3000])
+kd_front = np.diag([25,25,50])
+
+# HIND LEGS = indices 2 (RR), 3 (RL)
+kp_hind = kp_front
+kd_hind = kd_front
+
+###################################################### BOTH ###################################################################
+
+# joint PD gains
+# FRONT LEGS
+kp_joint_front = np.array([500, 2000, 525])
+kd_joint_front = np.array([10,   10,   10])
+
+# HIND LEGS
+kp_joint_hind  = np.array([500, 2000, 525])
+kd_joint_hind  = np.array([10,   10,   10])
+
+# Cartesian PD gains
+kp_front = np.diag([5000, 4500, 7500])
+kd_front = np.diag([25,25,50])
+
+# HIND LEGS = indices 2 (RR), 3 (RL)
+kp_hind = kp_front
+kd_hind = kd_front
+
+#####################################################################################################################################
+
+1) Average forward velocity: 0.6789629626531373
+Mean forward body velocity: 0.7526664569437493 m/s
+
+2) Average forward velocity: 1.2731158259059094
+Mean forward body velocity: 1.3850186735785008 m/s
+
+3) Average forward velocity: 0.9458829538967021
+Mean forward body velocity: 1.291224649663468 m/s
+
+4) Average forward velocity: 2.062820904130084
+Mean forward body velocity: 2.0739353509824228 m/s     
+
+Mean forward body velocity v_x: 1.815535203045412 m/s
+Mean horizontal speed v_xy: 1.8893616166369154 m/s
+Duty cycle per leg: [0.154  0.1544 0.192  0.2086]
+Average duty cycle: 0.17725
+Mean stance times: [0.01375, 0.014036363636363638, 0.017454545454545455, 0.018625]
+Mean swing times: [0.16185714285714287, 0.16478181818181814, 0.16045454545454543, 0.1560535714285714]
+Integrated horizontal distance: 9.446808083184575 m
+CoT (using integrated path length): 21.093118502258783

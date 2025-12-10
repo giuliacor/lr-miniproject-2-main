@@ -1,0 +1,49 @@
+{
+  "cpg_params": {
+    "mu": 1,
+    "omega_swing": 5,
+    "omega_stance": 3,
+    "gait": "WALK",
+    "alpha": 50,
+    "coupling_strength": 1,
+    "couple": true,
+    "time_step": 0.001,
+    "ground_clearance": 0.06,
+    "ground_penetration": 0.01,
+    "robot_height": 0.3,
+    "des_step_len": 0.05,
+    "max_step_len_rl": 0.1,
+    "use_RL": false
+  },
+
+  "joint_pd": {
+    "kp_joint": [200, 350, 350],
+    "kd_joint": [5, 5, 5]
+  },
+
+  "cartesian_pd": {
+    "kp_front": [
+      [3000, 0, 0],
+      [0, 1000, 0],
+      [0, 0, 4000]
+    ],
+
+    "kd_front": [
+      [12, 0, 0],
+      [0, 12, 0],
+      [0, 0, 12]
+    ],
+
+    "kp_hind": [
+      [3000, 0, 0],
+      [0, 1000, 0],
+      [0, 0, 4000]
+    ],
+
+    "kd_hind": [
+      [12, 0, 0],
+      [0, 12, 0],
+      [0, 0, 12]
+    ]
+  }
+}
