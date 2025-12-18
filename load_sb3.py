@@ -334,7 +334,6 @@ if len(seed_rollouts) == 0:
 else:
     dt_common = float(np.median([r["dt"] for (_, _, r) in seed_rollouts]))
 
-    # FIX: plot across the full configured episode length, not the shortest seed
     try:
         tmp_env = lambda: QuadrupedGymEnv(**env_config)
         tmp_env = make_vec_env(tmp_env, n_envs=1)
