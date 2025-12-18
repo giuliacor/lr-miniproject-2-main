@@ -191,7 +191,6 @@ def rollout_one_seed(seed_dir, n_steps=2000, deterministic=True):
     motor_dq_hist = []
     contact_hist = []
 
-    # use true env-step duration: dt_env = time_step * action_repeat
     dt_sim = None
     if hasattr(env.envs[0].env, "time_step"):
         dt_sim = float(env.envs[0].env.time_step)
