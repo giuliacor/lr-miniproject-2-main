@@ -27,7 +27,7 @@ from utils.file_utils import get_latest_model, load_all_results
 LEARNING_ALG = "PPO" #"SAC"
 interm_dir = "./logs/intermediate_models/"
 # path to saved models, i.e. interm_dir + '102824115106'
-log_dir = interm_dir + 'slopes/SLOPES_seed0_CPG_1M/'
+log_dir = interm_dir + 'cpg/VEL_seed0_05ms_CPG_1M/'
 
 # initialize env configs (render at test time)
 # check ideal conditions, as well as robustness to UNSEEN noise during training
@@ -38,10 +38,10 @@ env_config['record_video'] = False
 env_config['add_noise'] = False
 
 env_config["motor_control_mode"] = "CPG"
-env_config["task_env"] = "LR_COURSE_TASK"
-env_config["observation_space_mode"] = "LR_COURSE_OBS"
+env_config["task_env"] = "FWD_LOCOMOTION"
+env_config["observation_space_mode"] = "DEFAULT"
 env_config["on_rack"] = False
-env_config["terrain"] = "SLOPES"
+env_config["terrain"] = None
 
 is_vel_task = ("/cpg/VEL_" in log_dir.replace("\\", "/")) or ("\\cpg\\VEL_" in log_dir)
 

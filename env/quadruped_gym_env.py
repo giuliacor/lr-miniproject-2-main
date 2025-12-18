@@ -182,7 +182,7 @@ class QuadrupedGymEnv(gym.Env):
   def setupCPG(self):
     self._cpg = HopfNetwork(
         use_RL=True,
-        gait="TROT"  # TROT/PACE
+        gait="PACE"  # TROT/PACE
     )
 
   def _get_slope_features(self) -> np.ndarray:
